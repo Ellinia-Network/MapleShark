@@ -1,4 +1,5 @@
-﻿using System;
+﻿using MapleShark.Packet;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -15,6 +16,9 @@ namespace MapleShark
 
         SHIFT_IV = 1 << 5,
         SHIFT_IV_OLD = 1 << 6,
+
+        GMS_NEW = 1 << 7,
+
         NONE = 0
     }
 
@@ -27,19 +31,21 @@ namespace MapleShark
         private byte[] mBuffer = new byte[DEFAULT_SIZE];
         private int mCursor = 0;
         private int _expectedDataSize = 4;
+        private bool isLoginServer = false;
 
         private TransformMethod _transformMethod;
         private bool _usesByteHeader = false;
-        private bool _usesOldHeader = false;
+        private bool _usesOldHeader = false;        
 
         public ushort Build { get; private set; }
         public byte Locale { get; private set; }
 
-        public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion)
+        public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion, bool pLoginServer)
         {
             mOutbound = pOutbound;
             Build = pBuild;
             Locale = pLocale;
+            isLoginServer = pLoginServer;
 
             if (mOutbound)
                 mAES = new MapleAES(Build, Locale, pIV, pSubVersion);
@@ -65,7 +71,7 @@ namespace MapleShark
                 Locale == MapleLocale.CHINA ||
                 Locale == MapleLocale.TESPIA ||
                 Locale == MapleLocale.JAPAN ||
-                (Locale == MapleLocale.GLOBAL && (short)Build >= 149) ||
+                (Locale == MapleLocale.GLOBAL && (short)Build >= 149 && (short)Build < 193) ||
                 (Locale == MapleLocale.KOREA && Build >= 221) ||
                 (Locale == MapleLocale.SOUTH_EAST_ASIA && Build >= 144) ||
                 (Locale == MapleLocale.EUROPE && Build >= 115))
@@ -77,6 +83,10 @@ namespace MapleShark
             {
                 // KMS / KMST
                 _transformMethod = TransformMethod.KMS_CRYPTO;
+            }
+            else if (Locale == MapleLocale.GLOBAL && (short)Build >= 193)
+            {
+                _transformMethod = TransformMethod.AES | TransformMethod.SHIFT_IV | TransformMethod.GMS_NEW;
             }
             else
             {
@@ -144,6 +154,7 @@ namespace MapleShark
             else
             {
                 opcode = (ushort)(packetBuffer[0] | (packetBuffer[1] << 8));
+
                 Buffer.BlockCopy(packetBuffer, 2, packetBuffer, 0, packetSize - 2);
                 Array.Resize(ref packetBuffer, packetSize - 2);
             }
@@ -156,7 +167,18 @@ namespace MapleShark
 
         private void Decrypt(byte[] pBuffer, TransformMethod pTransformLocale)
         {
-            if ((pTransformLocale & TransformMethod.AES) != 0) mAES.TransformAES(pBuffer);
+            if ((pTransformLocale & TransformMethod.AES) != 0 && (pTransformLocale & TransformMethod.GMS_NEW) != 0)
+            {
+                if (!isLoginServer && !mOutbound)
+                    mAES.EncInit(pBuffer, false);
+                else
+                    mAES.TransformAES(pBuffer);
+            }
+
+            if ((pTransformLocale & TransformMethod.AES) != 0 && (pTransformLocale & TransformMethod.GMS_NEW) == 0)
+            {
+                mAES.TransformAES(pBuffer);
+            }                
 
             if ((pTransformLocale & TransformMethod.MAPLE_CRYPTO) != 0)
             {

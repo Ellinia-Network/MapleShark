@@ -1,12 +1,7 @@
-﻿using ScriptNET;
-using PacketDotNet;
-using PacketDotNet.Utils;
-using PacketDotNet.LLDP;
-using SharpPcap;
+﻿using PacketDotNet;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Text;
@@ -16,6 +11,7 @@ using WeifenLuo.WinFormsUI.Docking;
 
 using MapleLib.PacketLib;
 using System.Text.RegularExpressions;
+using MapleShark.Packet;
 
 namespace MapleShark
 {
@@ -45,6 +41,8 @@ namespace MapleShark
         private MapleStream mInboundStream = null;
         private List<MaplePacket> mPackets = new List<MaplePacket>();
         private List<Opcode> mOpcodes = new List<Opcode>();
+        private Dictionary<ushort, ushort> mOpcodeTable = new Dictionary<ushort, ushort>();
+        private bool isOpcodeTableLoaded = false;
         private int socks5 = 0;
 
         private string mRemoteEndpoint = "???";
@@ -110,14 +108,14 @@ namespace MapleShark
 
         internal Results BufferTCPPacket(TcpPacket pTCPPacket, DateTime pArrivalTime)
         {
-            if (pTCPPacket.Fin || pTCPPacket.Rst)
+            if (pTCPPacket.Finished || pTCPPacket.Reset)
             {
                 mTerminated = true;
                 Text += " (Terminated)";
 
                 return mPackets.Count == 0 ? Results.CloseMe : Results.Terminated;
             }
-            if (pTCPPacket.Syn && !pTCPPacket.Ack)
+            if (pTCPPacket.Synchronize && !pTCPPacket.Acknowledgment)
             {
                 mLocalPort = (ushort)pTCPPacket.SourcePort;
                 mRemotePort = (ushort)pTCPPacket.DestinationPort;
@@ -138,7 +136,7 @@ namespace MapleShark
                     return Results.CloseMe;
                 }
             }
-            if (pTCPPacket.Syn && pTCPPacket.Ack) { mInboundSequence = (uint)(pTCPPacket.SequenceNumber + 1); return Results.Continue; }
+            if (pTCPPacket.Synchronize && pTCPPacket.Acknowledgment) { mInboundSequence = (uint)(pTCPPacket.SequenceNumber + 1); return Results.Continue; }
             if (pTCPPacket.PayloadData.Length == 0) return Results.Continue;
             if (mBuild == 0)
             {
@@ -244,8 +242,8 @@ namespace MapleShark
                 mLocale = serverLocale;
                 mPatchLocation = patchLocation;
 
-                mOutboundStream = new MapleStream(true, mBuild, mLocale, localIV, subVersion);
-                mInboundStream = new MapleStream(false, mBuild, mLocale, remoteIV, subVersion);
+                mOutboundStream = new MapleStream(true, mBuild, mLocale, localIV, subVersion, mRemotePort == 8484);
+                mInboundStream = new MapleStream(false, mBuild, mLocale, remoteIV, subVersion, mRemotePort == 8484);
 
                 // Generate HandShake packet
                 Definition definition = Config.Instance.GetDefinition(mBuild, mLocale, false, 0xFFFF);
@@ -344,6 +342,62 @@ using (ScriptAPI) {
 
                 while ((packet = pStream.Read(pArrivalDate)) != null)
                 {
+                    if(Locale == MapleLocale.GLOBAL && Build >= 193)
+                    {
+                        if(packet.Outbound)
+                        {
+                            if(isOpcodeTableLoaded)
+                            {
+                                ushort realOpcode = 0;
+
+                                if (mOpcodeTable.TryGetValue(packet.Opcode, out realOpcode))
+                                    packet.Opcode = realOpcode;
+
+                                packet.SubItems[3].Text = $"0x{packet.Opcode.ToString("X4")}";
+                            }                            
+                        }
+                        else
+                        {
+                            if (!isOpcodeTableLoaded && packet.Opcode == Constants.OpcodeTableOpcode)
+                            {
+                                bool healthy = false;
+                                int blockSize, length = 0;
+
+                                healthy = packet.ReadInt(out blockSize);
+                                healthy = packet.ReadInt(out length);
+
+                                byte[] buffer = new byte[length];
+                                byte[] key = Encoding.ASCII.GetBytes(Constants.OpcodeTableKey);
+
+                                healthy = packet.ReadBytes(buffer);
+
+                                if (healthy)
+                                {
+                                    string opcodes = TripleDESCipher.Decrypt(buffer, key);
+
+                                    for (ushort i = 0; i < 0x0A7F - 0x00CA; i++)
+                                    {
+                                        if (i * 4 + 4 <= opcodes.Length)
+                                        {
+                                            string sOpcode = opcodes.Substring(i * 4, 4);
+
+                                            ushort uOpcode;
+                                            if (!UInt16.TryParse(sOpcode, out uOpcode))
+                                                break;
+
+                                            mOpcodeTable.Add(uOpcode, (ushort)(0x00CA + i));
+                                        }
+                                        else
+                                            healthy = false;
+                                    }                                    
+                                }
+
+                                if(healthy)
+                                    isOpcodeTableLoaded = true;
+                            }
+                        }
+                    }
+
                     AddPacket(packet);
                     Definition definition = Config.Instance.GetDefinition(mBuild, mLocale, packet.Outbound, packet.Opcode);
                     if (!mOpcodes.Exists(op => op.Outbound == packet.Outbound && op.Header == packet.Opcode))

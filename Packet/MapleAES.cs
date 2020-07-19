@@ -220,5 +220,21 @@ namespace MapleShark
             pIV[2] = (byte)((val >> 16) & 0xFF);
             pIV[3] = (byte)((val >> 24) & 0xFF);
         }
+
+        public void EncInit(byte[] aBuffer, bool bLoopback)
+        {
+            uint uIV = BitConverter.ToUInt32(mIV, 0);
+            for (int i = 0; i < aBuffer.Length; i++)
+            {
+                if (!bLoopback)
+                {
+                    aBuffer[i] -= (byte)(uIV);
+                }
+                else
+                {
+                    aBuffer[i] += (byte)(uIV);
+                }
+            }
+        }
     }
 }

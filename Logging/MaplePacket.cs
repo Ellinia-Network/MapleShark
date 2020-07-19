@@ -10,7 +10,7 @@ namespace MapleShark
         public bool Outbound { get; private set; }
         public ushort Build { get; private set; }
         public byte Locale { get; private set; }
-        public ushort Opcode { get; private set; }
+        public ushort Opcode { get; set; }
         public new string Name { set { SubItems[4].Text = value; } }
 
         public byte[] Buffer { get; private set; }
