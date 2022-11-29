@@ -159,33 +159,33 @@ namespace MapleShark
             }
 
             Console.WriteLine($"Opcode: {opcode}");
-            if (opcode == 43)
+            if (opcode == Constants.OpcodeEncryption)
             {
-                //encryptedHeaders.Clear();
-                //int numHeaders = BitConverter.ToInt32(packetBuffer, 4);
-                //byte[] headersBuffer = new byte[numHeaders];
-                //Buffer.BlockCopy(packetBuffer, 8, headersBuffer, 0, numHeaders);
-                //string headers = TripleDESCipher.Decrypt(headersBuffer, Encoding.ASCII.GetBytes(Constants.OpcodeEncryptionKey));
-                //try
-                //{
-                //    int headerOffset = 0;
-                //    for (int i = Constants.StartClientOp; i < Constants.EndClientOp; i++)
-                //    {
-                //        encryptedHeaders.Add(int.Parse(headers.Substring(headerOffset, 4)), i);
-                //        headerOffset += 4;
-                //    }
-                //}
-                //catch (Exception exception)
-                //{
-                //    Console.WriteLine(exception.Message);
-                //}
+                encryptedHeaders.Clear();
+                int numHeaders = BitConverter.ToInt32(packetBuffer, 4);
+                byte[] headersBuffer = new byte[numHeaders];
+                Buffer.BlockCopy(packetBuffer, 8, headersBuffer, 0, numHeaders);
+                string headers = TripleDESCipher.Decrypt(headersBuffer, Encoding.ASCII.GetBytes(Constants.OpcodeEncryptionKey));
+                try
+                {
+                    int headerOffset = 0;
+                    for (int i = Constants.StartClientOp; i < Constants.EndClientOp; i++)
+                    {
+                        encryptedHeaders.Add(int.Parse(headers.Substring(headerOffset, 4)), i);
+                        headerOffset += 4;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    Console.WriteLine(exception.Message);
+                }
             }
             else if (remotePort != 8484 && mOutbound)
             {
-                //if (encryptedHeaders.ContainsKey(opcode))
-                //{
-                //    opcode = (ushort)encryptedHeaders[opcode];
-                //}
+                if (encryptedHeaders.ContainsKey(opcode))
+                {
+                    opcode = (ushort)encryptedHeaders[opcode];
+                }
             }
 
             _expectedDataSize = 4;

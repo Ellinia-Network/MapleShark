@@ -10,7 +10,7 @@ namespace MapleShark
     {
 
         //public static string OpcodeTableKey => "M@PleStoryMaPLe!";
-        public static short OpcodeEncryption = 43;
+        public static short OpcodeEncryption = 44;
         public static short StartClientOp = 200;
         public static short EndClientOp = 0x680;
         public static string OpcodeEncryptionKey = "N3x@nGLEUH@ckEr!";
