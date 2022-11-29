@@ -12,6 +12,7 @@ using WeifenLuo.WinFormsUI.Docking;
 using MapleLib.PacketLib;
 using System.Text.RegularExpressions;
 using MapleShark.Packet;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace MapleShark
 {
@@ -41,8 +42,6 @@ namespace MapleShark
         private MapleStream mInboundStream = null;
         private List<MaplePacket> mPackets = new List<MaplePacket>();
         private List<Opcode> mOpcodes = new List<Opcode>();
-        private Dictionary<ushort, ushort> mOpcodeTable = new Dictionary<ushort, ushort>();
-        private bool isOpcodeTableLoaded = false;
         private int socks5 = 0;
 
         private string mRemoteEndpoint = "???";
@@ -136,203 +135,35 @@ namespace MapleShark
                     return Results.CloseMe;
                 }
             }
-            if (pTCPPacket.Synchronize && pTCPPacket.Acknowledgment) { mInboundSequence = (uint)(pTCPPacket.SequenceNumber + 1); return Results.Continue; }
-            if (pTCPPacket.PayloadData.Length == 0) return Results.Continue;
+            if (pTCPPacket.Synchronize && pTCPPacket.Acknowledgment)
+            { 
+                mInboundSequence = (uint)(pTCPPacket.SequenceNumber + 1);
+                return Results.Continue;
+            }
+            if (pTCPPacket.PayloadData.Length == 0)
+            {
+                return Results.Continue;
+            }
             if (mBuild == 0)
             {
-                byte[] tcpData = pTCPPacket.PayloadData;
-
-                if (pTCPPacket.SourcePort == mLocalPort) mOutboundSequence += (uint)tcpData.Length;
-                else mInboundSequence += (uint)tcpData.Length;
-
-                ushort length = (ushort)(BitConverter.ToUInt16(tcpData, 0) + 2);
-                byte[] headerData = new byte[tcpData.Length];
-                Buffer.BlockCopy(tcpData, 0, headerData, 0, tcpData.Length);
-
-                bool mIsKMS = false;
-
-                PacketReader pr = new PacketReader(headerData);
-
-                if (length != tcpData.Length || tcpData.Length < 13)
-                {
-                    if (socks5 > 0 && socks5 < 7)
-                    {
-                        if (pr.ReadByte() == 5 && pr.ReadByte() == 1)
-                        {
-                            pr.ReadByte();
-                            mProxyEndpoint = mLocalEndpoint;
-                            mLocalEndpoint = "";
-                            switch (pr.ReadByte())
-                            {
-                                case 1://IPv4
-                                    for (int i = 0; i < 4; i++)
-                                    {
-                                        mLocalEndpoint += pr.ReadByte();
-                                        if (i < 3)
-                                        {
-                                            mLocalEndpoint += ".";
-                                        }
-                                    }
-                                    break;
-                                case 3://Domain
-                                    //readInt - String Length
-                                    //readAsciiString - Address
-                                    break;
-                                case 4://IPv6
-                                    for (int i = 0; i < 16; i++)
-                                    {
-                                        pr.ReadByte();
-                                    }
-                                    break;
-                            }
-                            byte[] ports = new byte[2];
-                            for (int i = 1; i >= 0; i--)
-                            {
-                                ports[i] = pr.ReadByte();
-                            }
-                            PacketReader portr = new PacketReader(ports);
-                            mProxyPort = mRemotePort;
-                            mRemotePort = portr.ReadUShort();
-                            mLocalEndpoint += ":" + mRemotePort;
-                            Text = "Port " + mLocalPort + " - " + mRemotePort + "(Proxy" + mProxyPort + ")";
-                            Console.WriteLine("[socks5] From {0} to {1} (Proxy {2})", mRemoteEndpoint, mLocalEndpoint, mProxyEndpoint);
-                        }
-                        socks5++;
-                        return Results.Continue;
-                    }
-                    else if (tcpData.Length == 3 && pr.ReadByte() == 5)
-                    {
-                        socks5 = 1;
-                        return Results.Continue;
-                    }
-                    Console.WriteLine("Connection on port {0} did not have a MapleStory Handshake", mLocalEndpoint);
-                    return Results.CloseMe;
-                }
-
-                pr.ReadUShort();
-                ushort version = pr.ReadUShort();
-                byte subVersion = 1;
-                string patchLocation = pr.ReadMapleString();
-                byte[] localIV = pr.ReadBytes(4);
-                byte[] remoteIV = pr.ReadBytes(4);
-                byte serverLocale = pr.ReadByte();
-
-                if (serverLocale > 0x12)
-                {
-                    return Results.CloseMe;
-                }
-
-                if (serverLocale == 0x02 || (serverLocale == 0x01 && version > 255)) mIsKMS = true;
-                else mIsKMS = false;
-
-                if (mIsKMS)
-                {
-                    int test = int.Parse(patchLocation);
-                    version = (ushort)(test & 0x7FFF);
-                    subVersion = (byte)((test >> 16) & 0xFF);
-                }
-                else if (patchLocation.All(character => { return character >= '0' && character <= '9'; }))
-                {
-                    if (!byte.TryParse(patchLocation, out subVersion))
-                        Console.WriteLine("Failed to parse subVersion");
-                }
-
-                mBuild = version;
-
-                mLocale = serverLocale;
-                mPatchLocation = patchLocation;
-
-                mOutboundStream = new MapleStream(true, mBuild, mLocale, localIV, subVersion, mRemotePort == 8484);
-                mInboundStream = new MapleStream(false, mBuild, mLocale, remoteIV, subVersion, mRemotePort == 8484);
-
-                // Generate HandShake packet
-                Definition definition = Config.Instance.GetDefinition(mBuild, mLocale, false, 0xFFFF);
-                if (definition == null)
-                {
-                    definition = new Definition();
-                    definition.Outbound = false;
-                    definition.Locale = mLocale;
-                    definition.Opcode = 0xFFFF;
-                    definition.Name = "Maple Handshake";
-                    definition.Build = mBuild;
-                    SaveDefinition(definition);
-                }
-
-                {
-
-
-                    var filename = Helpers.GetScriptPath(mLocale, mBuild, false, 0xFFFF);
-                    Helpers.MakeSureFileDirectoryExists(filename);
-
-                    // Create main script
-                    if (!File.Exists(filename))
-                    {
-                        string contents = @"
-using (ScriptAPI) {
-    AddShort(""Packet Size"");
-    AddUShort(""MapleStory Version"");
-    AddString(""MapleStory Patch Location/Subversion"");
-    AddField(""Local Initializing Vector (IV)"", 4);
-    AddField(""Remote Initializing Vector (IV)"", 4);
-    AddByte(""MapleStory Locale"");
-}
-";
-                        File.WriteAllText(filename, contents);
-                    }
-                }
-
-                MaplePacket packet = new MaplePacket(pArrivalTime, false, mBuild, mLocale, 0xFFFF, definition == null ? "" : definition.Name, tcpData, (uint)0, BitConverter.ToUInt32(remoteIV, 0));
-                if (!mOpcodes.Exists(op => op.Outbound == packet.Outbound && op.Header == packet.Opcode)) // Should be false, but w/e
-                {
-                    mOpcodes.Add(new Opcode(packet.Outbound, packet.Opcode));
-                }
-
-                mPacketList.Items.Add(packet);
-                AddPacket(packet);
-
-                Console.WriteLine("[CONNECTION] MapleStory V{2}.{3} Locale {4}", mLocalEndpoint, mRemoteEndpoint, mBuild, subVersion, serverLocale);
-                
-                ProcessTCPPacket(pTCPPacket, ref mInboundSequence, mInboundBuffer, mInboundStream, pArrivalTime);
-                return Results.Show;
+                return HandleHandshake(pTCPPacket, pArrivalTime);
             }
-            if (pTCPPacket.SourcePort == mLocalPort) ProcessTCPPacket(pTCPPacket, ref mOutboundSequence, mOutboundBuffer, mOutboundStream, pArrivalTime);
-            else ProcessTCPPacket(pTCPPacket, ref mInboundSequence, mInboundBuffer, mInboundStream, pArrivalTime);
+
+            if (pTCPPacket.SourcePort == mLocalPort)
+            {
+                ProcessTCPPacket(pTCPPacket, ref mOutboundSequence, mOutboundBuffer, mOutboundStream, pArrivalTime);
+            }
+            else
+            {
+                ProcessTCPPacket(pTCPPacket, ref mInboundSequence, mInboundBuffer, mInboundStream, pArrivalTime);
+            }
+
             return Results.Continue;
         }
 
         private void ProcessTCPPacket(TcpPacket pTCPPacket, ref uint pSequence, Dictionary<uint, byte[]> pBuffer, MapleStream pStream, DateTime pArrivalDate)
         {
-            if (pTCPPacket.SequenceNumber > pSequence)
-            {
-                byte[] data;
-
-                while (pBuffer.TryGetValue(pSequence, out data))
-                {
-                    pBuffer.Remove(pSequence);
-                    pStream.Append(data);
-                    pSequence += (uint)data.Length;
-                }
-                if (pTCPPacket.SequenceNumber > pSequence) pBuffer[(uint)pTCPPacket.SequenceNumber] = pTCPPacket.PayloadData;
-            }
-            if (pTCPPacket.SequenceNumber < pSequence)
-            {
-                int difference = (int)(pSequence - pTCPPacket.SequenceNumber);
-                if (difference > 0)
-                {
-                    byte[] data = pTCPPacket.PayloadData;
-                    if (data.Length > difference)
-                    {
-                        pStream.Append(data, difference, data.Length - difference);
-                        pSequence += (uint)(data.Length - difference);
-                    }
-                }
-            }
-            else if (pTCPPacket.SequenceNumber == pSequence)
-            {
-                byte[] data = pTCPPacket.PayloadData;
-                pStream.Append(data);
-                pSequence += (uint)data.Length;
-            }
+            HandleTCPSeq(pTCPPacket, ref pSequence, pBuffer, pStream);
 
             MaplePacket packet;
             bool refreshOpcodes = false;
@@ -340,64 +171,8 @@ using (ScriptAPI) {
             {
                 mPacketList.BeginUpdate();
 
-                while ((packet = pStream.Read(pArrivalDate)) != null)
+                while ((packet = pStream.Read(pArrivalDate, mRemotePort)) != null)
                 {
-                    if(Locale == MapleLocale.GLOBAL && Build >= 193)
-                    {
-                        if(packet.Outbound)
-                        {
-                            if(isOpcodeTableLoaded)
-                            {
-                                ushort realOpcode = 0;
-
-                                if (mOpcodeTable.TryGetValue(packet.Opcode, out realOpcode))
-                                    packet.Opcode = realOpcode;
-
-                                packet.SubItems[3].Text = $"0x{packet.Opcode.ToString("X4")}";
-                            }                            
-                        }
-                        else
-                        {
-                            if (!isOpcodeTableLoaded && packet.Opcode == Constants.OpcodeTableOpcode)
-                            {
-                                bool healthy = false;
-                                int blockSize, length = 0;
-
-                                healthy = packet.ReadInt(out blockSize);
-                                healthy = packet.ReadInt(out length);
-
-                                byte[] buffer = new byte[length];
-                                byte[] key = Encoding.ASCII.GetBytes(Constants.OpcodeTableKey);
-
-                                healthy = packet.ReadBytes(buffer);
-
-                                if (healthy)
-                                {
-                                    string opcodes = TripleDESCipher.Decrypt(buffer, key);
-
-                                    for (ushort i = 0; i < 0x0A7F - 0x00CA; i++)
-                                    {
-                                        if (i * 4 + 4 <= opcodes.Length)
-                                        {
-                                            string sOpcode = opcodes.Substring(i * 4, 4);
-
-                                            ushort uOpcode;
-                                            if (!UInt16.TryParse(sOpcode, out uOpcode))
-                                                break;
-
-                                            mOpcodeTable.Add(uOpcode, (ushort)(0x00CA + i));
-                                        }
-                                        else
-                                            healthy = false;
-                                    }                                    
-                                }
-
-                                if(healthy)
-                                    isOpcodeTableLoaded = true;
-                            }
-                        }
-                    }
-
                     AddPacket(packet);
                     Definition definition = Config.Instance.GetDefinition(mBuild, mLocale, packet.Outbound, packet.Opcode);
                     if (!mOpcodes.Exists(op => op.Outbound == packet.Outbound && op.Header == packet.Opcode))
@@ -425,6 +200,195 @@ using (ScriptAPI) {
             }
 
             if (DockPanel != null && DockPanel.ActiveDocument == this && refreshOpcodes) MainForm.SearchForm.RefreshOpcodes(true);
+        }
+
+        private static void HandleTCPSeq(TcpPacket pTCPPacket, ref uint pSequence, IDictionary<uint, byte[]> pBuffer, MapleStream pStream)
+        {
+            if (pTCPPacket.SequenceNumber > pSequence)
+            {
+                byte[] data;
+
+                while (pBuffer.TryGetValue(pSequence, out data))
+                {
+                    pBuffer.Remove(pSequence);
+                    pStream.Append(data);
+                    pSequence += (uint)data.Length;
+                }
+                if (pTCPPacket.SequenceNumber > pSequence)
+                {
+                    pBuffer[(uint)pTCPPacket.SequenceNumber] = pTCPPacket.PayloadData;
+                }
+            }
+            if (pTCPPacket.SequenceNumber < pSequence)
+            {
+                int difference = (int)(pSequence - pTCPPacket.SequenceNumber);
+                if (difference > 0)
+                {
+                    byte[] data = pTCPPacket.PayloadData;
+                    if (data.Length > difference)
+                    {
+                        pStream.Append(data, difference, data.Length - difference);
+                        pSequence += (uint)(data.Length - difference);
+                    }
+                }
+            }
+            else if (pTCPPacket.SequenceNumber == pSequence)
+            {
+                byte[] data = pTCPPacket.PayloadData;
+                pStream.Append(data);
+                pSequence += (uint)data.Length;
+            }
+        }
+
+        private Results HandleHandshake(TcpPacket pTCPPacket, DateTime pArrivalTime)
+        {
+            byte[] tcpData = pTCPPacket.PayloadData;
+
+            if (pTCPPacket.SourcePort == mLocalPort) mOutboundSequence += (uint)tcpData.Length;
+            else mInboundSequence += (uint)tcpData.Length;
+
+            ushort length = (ushort)(BitConverter.ToUInt16(tcpData, 0) + 2);
+            byte[] headerData = new byte[tcpData.Length];
+            Buffer.BlockCopy(tcpData, 0, headerData, 0, tcpData.Length);
+
+            PacketReader packetReader = new PacketReader(headerData);
+
+            if (length != tcpData.Length || tcpData.Length < 13)
+            {
+                if (socks5 > 0 && socks5 < 7)
+                {
+                    if (packetReader.ReadByte() == 5 && packetReader.ReadByte() == 1)
+                    {
+                        packetReader.ReadByte();
+                        mProxyEndpoint = mLocalEndpoint;
+                        mLocalEndpoint = "";
+                        switch (packetReader.ReadByte())
+                        {
+                            case 1://IPv4
+                                for (int i = 0; i < 4; i++)
+                                {
+                                    mLocalEndpoint += packetReader.ReadByte();
+                                    if (i < 3)
+                                    {
+                                        mLocalEndpoint += ".";
+                                    }
+                                }
+                                break;
+                            case 3://Domain
+                                   //readInt - String Length
+                                   //readAsciiString - Address
+                                break;
+                            case 4://IPv6
+                                for (int i = 0; i < 16; i++)
+                                {
+                                    packetReader.ReadByte();
+                                }
+                                break;
+                        }
+                        byte[] ports = new byte[2];
+                        for (int i = 1; i >= 0; i--)
+                        {
+                            ports[i] = packetReader.ReadByte();
+                        }
+                        PacketReader portr = new PacketReader(ports);
+                        mProxyPort = mRemotePort;
+                        mRemotePort = portr.ReadUShort();
+                        mLocalEndpoint += ":" + mRemotePort;
+                        Text = "Port " + mLocalPort + " - " + mRemotePort + "(Proxy" + mProxyPort + ")";
+                        Console.WriteLine("[socks5] From {0} to {1} (Proxy {2})", mRemoteEndpoint, mLocalEndpoint, mProxyEndpoint);
+                    }
+                    socks5++;
+                    return Results.Continue;
+                }
+                else if (tcpData.Length == 3 && packetReader.ReadByte() == 5)
+                {
+                    socks5 = 1;
+                    return Results.Continue;
+                }
+                Console.WriteLine("Connection on port {0} did not have a MapleStory Handshake", mLocalEndpoint);
+                return Results.CloseMe;
+            }
+
+            packetReader.ReadUShort();
+            ushort version = packetReader.ReadUShort();
+            byte subVersion = 1;
+            string patchLocation = packetReader.ReadMapleString();
+            byte[] localIV = packetReader.ReadBytes(4);
+            byte[] remoteIV = packetReader.ReadBytes(4);
+            byte serverLocale = packetReader.ReadByte();
+
+            if (serverLocale > 0x12)
+            {
+                return Results.CloseMe;
+            }
+
+            if (serverLocale == 0x02 || (serverLocale == 0x01 && version > 255))
+            {
+                // Is KMS
+
+                int test = int.Parse(patchLocation);
+                version = (ushort)(test & 0x7FFF);
+                subVersion = (byte)((test >> 16) & 0xFF);
+            }
+            else if (patchLocation.All(character => { return character >= '0' && character <= '9'; }))
+            {
+                if (!byte.TryParse(patchLocation, out subVersion))
+                    Console.WriteLine("Failed to parse subVersion");
+            }
+
+            mBuild = version;
+
+            mLocale = serverLocale;
+            mPatchLocation = patchLocation;
+
+            mOutboundStream = new MapleStream(true, mBuild, mLocale, localIV, subVersion);
+            mInboundStream = new MapleStream(false, mBuild, mLocale, remoteIV, subVersion);
+
+            // Generate HandShake packet
+            Definition definition = Config.Instance.GetDefinition(mBuild, mLocale, false, 0xFFFF);
+            if (definition == null)
+            {
+                definition = new Definition();
+                definition.Outbound = false;
+                definition.Locale = mLocale;
+                definition.Opcode = 0xFFFF;
+                definition.Name = "Maple Handshake";
+                definition.Build = mBuild;
+                SaveDefinition(definition);
+            }
+
+            var scriptPath = Helpers.GetScriptPath(mLocale, mBuild, false, 0xFFFF);
+            Helpers.MakeSureFileDirectoryExists(scriptPath);
+
+            // Create main script
+            if (!File.Exists(scriptPath))
+            {
+                string contents = @"
+using (ScriptAPI) {
+    AddShort(""Packet Size"");
+    AddUShort(""MapleStory Version"");
+    AddString(""MapleStory Patch Location/Subversion"");
+    AddField(""Local Initializing Vector (IV)"", 4);
+    AddField(""Remote Initializing Vector (IV)"", 4);
+    AddByte(""MapleStory Locale"");
+}
+";
+                File.WriteAllText(scriptPath, contents);
+            }
+
+            MaplePacket packet = new MaplePacket(pArrivalTime, false, mBuild, mLocale, 0xFFFF, definition == null ? "" : definition.Name, tcpData, (uint)0, BitConverter.ToUInt32(remoteIV, 0));
+            if (!mOpcodes.Exists(op => op.Outbound == packet.Outbound && op.Header == packet.Opcode)) // Should be false, but w/e
+            {
+                mOpcodes.Add(new Opcode(packet.Outbound, packet.Opcode));
+            }
+
+            mPacketList.Items.Add(packet);
+            AddPacket(packet);
+
+            Console.WriteLine("[CONNECTION] MapleStory V{2}.{3} Locale {4}", mLocalEndpoint, mRemoteEndpoint, mBuild, subVersion, serverLocale);
+
+            ProcessTCPPacket(pTCPPacket, ref mInboundSequence, mInboundBuffer, mInboundStream, pArrivalTime);
+            return Results.Show;
         }
 
         public void OpenReadOnly(string pFilename)

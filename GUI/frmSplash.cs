@@ -76,7 +76,7 @@ namespace MapleShark
             Environment.CurrentDirectory = filepath.Remove(filepath.LastIndexOf(System.IO.Path.DirectorySeparatorChar));
 
             initialisator.ReportProgress(0, "Checking for updates");
-            CraftNetTools.AppUpdates.Check();
+            //CraftNetTools.AppUpdates.Check();
 
             initialisator.ReportProgress(0, "Initializing MapleStory AES Keys");
             MapleKeys.Initialize();

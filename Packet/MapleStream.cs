@@ -17,7 +17,7 @@ namespace MapleShark
         SHIFT_IV = 1 << 5,
         SHIFT_IV_OLD = 1 << 6,
 
-        GMS_NEW = 1 << 7,
+        //GMS_NEW = 1 << 7,
 
         NONE = 0
     }
@@ -26,12 +26,12 @@ namespace MapleShark
     {
         private const int DEFAULT_SIZE = 4096;
 
+        private static Dictionary<int, int> encryptedHeaders = new Dictionary<int, int>();
         private bool mOutbound = false;
         private MapleAES mAES = null;
         private byte[] mBuffer = new byte[DEFAULT_SIZE];
         private int mCursor = 0;
         private int _expectedDataSize = 4;
-        private bool isLoginServer = false;
 
         private TransformMethod _transformMethod;
         private bool _usesByteHeader = false;
@@ -40,12 +40,11 @@ namespace MapleShark
         public ushort Build { get; private set; }
         public byte Locale { get; private set; }
 
-        public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion, bool pLoginServer)
+        public MapleStream(bool pOutbound, ushort pBuild, byte pLocale, byte[] pIV, byte pSubVersion)
         {
             mOutbound = pOutbound;
             Build = pBuild;
             Locale = pLocale;
-            isLoginServer = pLoginServer;
 
             if (mOutbound)
                 mAES = new MapleAES(Build, Locale, pIV, pSubVersion);
@@ -71,7 +70,7 @@ namespace MapleShark
                 Locale == MapleLocale.CHINA ||
                 Locale == MapleLocale.TESPIA ||
                 Locale == MapleLocale.JAPAN ||
-                (Locale == MapleLocale.GLOBAL && (short)Build >= 149 && (short)Build < 193) ||
+                (Locale == MapleLocale.GLOBAL && (short)Build >= 149) ||
                 (Locale == MapleLocale.KOREA && Build >= 221) ||
                 (Locale == MapleLocale.SOUTH_EAST_ASIA && Build >= 144) ||
                 (Locale == MapleLocale.EUROPE && Build >= 115))
@@ -84,10 +83,10 @@ namespace MapleShark
                 // KMS / KMST
                 _transformMethod = TransformMethod.KMS_CRYPTO;
             }
-            else if (Locale == MapleLocale.GLOBAL && (short)Build >= 193)
-            {
-                _transformMethod = TransformMethod.AES | TransformMethod.SHIFT_IV | TransformMethod.GMS_NEW;
-            }
+            //else if (Locale == MapleLocale.GLOBAL && (short)Build >= 193)
+            //{
+            //    _transformMethod = TransformMethod.AES | TransformMethod.SHIFT_IV | TransformMethod.GMS_NEW;
+            //}
             else
             {
                 // All others lol
@@ -110,7 +109,7 @@ namespace MapleShark
             mCursor += pLength;
         }
 
-        public MaplePacket Read(DateTime pTransmitted)
+        public MaplePacket Read(DateTime pTransmitted, ushort remotePort)
         {
             if (mCursor < _expectedDataSize) return null;
             if (!mAES.ConfirmHeader(mBuffer, 0))
@@ -137,7 +136,7 @@ namespace MapleShark
 
             var preDecodeIV = BitConverter.ToUInt32(mAES.mIV, 0);
 
-            Decrypt(packetBuffer, _transformMethod);
+            Decrypt(packetBuffer, _transformMethod, remotePort);
 
             var postDecodeIV = BitConverter.ToUInt32(mAES.mIV, 0);
 
@@ -159,26 +158,55 @@ namespace MapleShark
                 Array.Resize(ref packetBuffer, packetSize - 2);
             }
 
+            Console.WriteLine($"Opcode: {opcode}");
+            if (opcode == 43)
+            {
+                //encryptedHeaders.Clear();
+                //int numHeaders = BitConverter.ToInt32(packetBuffer, 4);
+                //byte[] headersBuffer = new byte[numHeaders];
+                //Buffer.BlockCopy(packetBuffer, 8, headersBuffer, 0, numHeaders);
+                //string headers = TripleDESCipher.Decrypt(headersBuffer, Encoding.ASCII.GetBytes(Constants.OpcodeEncryptionKey));
+                //try
+                //{
+                //    int headerOffset = 0;
+                //    for (int i = Constants.StartClientOp; i < Constants.EndClientOp; i++)
+                //    {
+                //        encryptedHeaders.Add(int.Parse(headers.Substring(headerOffset, 4)), i);
+                //        headerOffset += 4;
+                //    }
+                //}
+                //catch (Exception exception)
+                //{
+                //    Console.WriteLine(exception.Message);
+                //}
+            }
+            else if (remotePort != 8484 && mOutbound)
+            {
+                //if (encryptedHeaders.ContainsKey(opcode))
+                //{
+                //    opcode = (ushort)encryptedHeaders[opcode];
+                //}
+            }
+
             _expectedDataSize = 4;
 
             Definition definition = Config.Instance.GetDefinition(Build, Locale, mOutbound, opcode);
             return new MaplePacket(pTransmitted, mOutbound, Build, Locale, opcode, definition == null ? "" : definition.Name, packetBuffer, preDecodeIV, postDecodeIV);
         }
 
-        private void Decrypt(byte[] pBuffer, TransformMethod pTransformLocale)
+        private void Decrypt(byte[] pBuffer, TransformMethod pTransformLocale, ushort remotePort)
         {
-            if ((pTransformLocale & TransformMethod.AES) != 0 && (pTransformLocale & TransformMethod.GMS_NEW) != 0)
+            if ((pTransformLocale & TransformMethod.AES) != 0)
             {
-                if (!isLoginServer && !mOutbound)
-                    mAES.EncInit(pBuffer, false);
+                if (remotePort != 8484 && !mOutbound)
+                {
+                    mAES.EncInit(pBuffer, true);
+                }
                 else
+                {
                     mAES.TransformAES(pBuffer);
+                }
             }
-
-            if ((pTransformLocale & TransformMethod.AES) != 0 && (pTransformLocale & TransformMethod.GMS_NEW) == 0)
-            {
-                mAES.TransformAES(pBuffer);
-            }                
 
             if ((pTransformLocale & TransformMethod.MAPLE_CRYPTO) != 0)
             {

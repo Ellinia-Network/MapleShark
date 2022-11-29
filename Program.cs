@@ -7,11 +7,18 @@ using System.Windows.Forms;
 using System.Security.Principal;
 
 using SharpPcap.LibPcap;
+using System.Runtime.InteropServices;
+using SharpPcap;
 
 namespace MapleShark
 {
     internal static class Program
     {
+        
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool AllocConsole();
+
         [STAThread]
         private static void Main(string[] pArgs)
         {
@@ -29,7 +36,7 @@ namespace MapleShark
 
             try
             {
-                if (LibPcapLiveDeviceList.Instance.Count == 0) throw new Exception();
+                if (CaptureDeviceList.Instance.Count == 0) throw new Exception();
             }
             catch
             {
@@ -43,6 +50,8 @@ namespace MapleShark
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            //AllocConsole();
 
             using (var frm = new frmSplash())
             {

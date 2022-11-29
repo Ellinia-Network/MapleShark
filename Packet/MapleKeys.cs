@@ -23,8 +23,10 @@ namespace MapleShark
         {
             Console.WriteLine("Initializing keys...");
             MapleStoryKeys = new Dictionary<byte, Dictionary<KeyValuePair<ushort, byte>, byte[]>>();
-            
-            AddKey(8, 232, 2, new byte[] { 0x5E, 0x9C, 0x9F, 0x0C, 0x65, 0x89, 0x7A, 0x63 });
+
+            //AddKey(8, 232, 2, new byte[] { 0x5E, 0x9C, 0x9F, 0x0C, 0x65, 0x89, 0x7A, 0x63 });
+            //AddKey(8, 236, 2, new byte[] { 0xCA, 0x89, 0xFD, 0xF6, 0x99, 0xF0, 0xA6, 0x0B });
+            AddKey(8, 237, 1, new byte[] { 0x5E, 0x4C, 0xB4, 0xAD, 0xCA, 0x9D, 0x79, 0x7C });
 
             // Quickly count amount of keys
             int keyCount = 0;
@@ -55,7 +57,7 @@ namespace MapleShark
                         byte[] ret = new byte[32];
                         for (int i = 0; i < 8; i++)
                             ret[i * 4] = key[i];
-
+                        
                         Console.WriteLine("Using key for version {0}.{1}", v, sv);
                         return ret;
                     }

@@ -15,7 +15,7 @@ namespace MapleShark
     public partial class MainForm : Form
     {
         private bool mClosed = false;
-        private LibPcapLiveDevice mDevice = null;
+        private ILiveDevice mDevice = null;
         private SearchForm mSearchForm = new SearchForm();
         private DataForm mDataForm = new DataForm();
         private StructureForm mStructureForm = new StructureForm();
@@ -79,9 +79,9 @@ namespace MapleShark
                 mDevice.Close();
             }
 
-            foreach (LibPcapLiveDevice device in LibPcapLiveDeviceList.Instance)
+            foreach (var device in CaptureDeviceList.Instance)
             {
-                if (device.Interface.FriendlyName == Config.Instance.Interface)
+                if (device.Name == Config.Instance.Interface)
                 {
                     mDevice = device;
                     break;
@@ -101,15 +101,15 @@ namespace MapleShark
                 SetupAdapter();
             }
 
-            try
-            {
-                mDevice.Open(DeviceMode.Promiscuous, 1);
-            }
-            catch
-            {
-                MessageBox.Show("Failed to set the device in Promiscuous mode! But that doesn't really matter lol.");
-                mDevice.Open();
-            }
+            //try
+            //{
+                mDevice.Open(DeviceModes.None, 1);
+            //}
+            //catch
+            //{
+            //    MessageBox.Show("Failed to set the device in Promiscuous mode! But that doesn't really matter lol.");
+            //    mDevice.Open();
+            //}
             mDevice.Filter = string.Format("tcp portrange {0}-{1}", Config.Instance.LowPort, Config.Instance.HighPort);
         }
 
@@ -185,17 +185,17 @@ namespace MapleShark
 
         void ParseImportedFile()
         {
-            RawCapture packet = null;
+            //RawCapture packet = null;
             SessionForm session = null;
 
             this.Invoke((MethodInvoker)delegate
             {
-                while ((packet = device.GetNextPacket()) != null)
+                while ((device.GetNextPacket(out var packet)) == GetPacketStatus.PacketRead)
                 {
                     if (!started)
                         continue;
 
-                    TcpPacket tcpPacket = (TcpPacket)TcpPacket.ParsePacket(packet.LinkLayerType, packet.Data).Extract<TcpPacket>();
+                    TcpPacket tcpPacket = (TcpPacket)TcpPacket.ParsePacket(packet.Device.LinkType, packet.Data.ToArray()).Extract<TcpPacket>();
                     if (tcpPacket == null)
                         continue;
 
@@ -210,7 +210,7 @@ namespace MapleShark
                                 session.Show(mDockPanel, DockState.Document);
 
                             session = NewSession();
-                            var res = session.BufferTCPPacket(tcpPacket, packet.Timeval.Date);
+                            var res = session.BufferTCPPacket(tcpPacket, packet.Header.Timeval.Date);
                             if (res == SessionForm.Results.Continue)
                             {
                                 //    mDockPanel.Contents.Add(session);
@@ -219,7 +219,7 @@ namespace MapleShark
                         }
                         else if (session != null && session.MatchTCPPacket(tcpPacket))
                         {
-                            var res = session.BufferTCPPacket(tcpPacket, packet.Timeval.Date);
+                            var res = session.BufferTCPPacket(tcpPacket, packet.Header.Timeval.Date);
                             if (res == SessionForm.Results.CloseMe)
                             {
                                 session.Close();
@@ -304,7 +304,6 @@ namespace MapleShark
         {
             try
             {
-                RawCapture packet = null;
                 mTimer.Enabled = false;
 
                 DateTime now = DateTime.Now;
@@ -316,19 +315,19 @@ namespace MapleShark
                 closes.ForEach((a) => { a.Close(); });
                 closes.Clear();
 
-                while ((packet = mDevice.GetNextPacket()) != null)
+                while ((mDevice.GetNextPacket(out var packet)) == GetPacketStatus.PacketRead)
                 {
                     if (!started)
                         continue;
 
-                    TcpPacket tcpPacket = (TcpPacket)TcpPacket.ParsePacket(packet.LinkLayerType, packet.Data).Extract<TcpPacket>();
+                    TcpPacket tcpPacket = (TcpPacket)TcpPacket.ParsePacket(packet.Device.LinkType, packet.Data.ToArray()).Extract<TcpPacket>();
                     SessionForm session = null;
                     try
                     {
                         if (tcpPacket.Synchronize && !tcpPacket.Acknowledgment && tcpPacket.DestinationPort >= Config.Instance.LowPort && tcpPacket.DestinationPort <= Config.Instance.HighPort)
                         {
                             session = NewSession();
-                            var res = session.BufferTCPPacket(tcpPacket, packet.Timeval.Date);
+                            var res = session.BufferTCPPacket(tcpPacket, packet.Header.Timeval.Date);
                             if (res == SessionForm.Results.Continue)
                             {
                                 int hash = tcpPacket.SourcePort << 16 | tcpPacket.DestinationPort;
@@ -341,7 +340,7 @@ namespace MapleShark
                             session = Array.Find(MdiChildren, f => (f as SessionForm).MatchTCPPacket(tcpPacket)) as SessionForm;
                             if (session != null)
                             {
-                                var res = session.BufferTCPPacket(tcpPacket, packet.Timeval.Date);
+                                var res = session.BufferTCPPacket(tcpPacket, packet.Header.Timeval.Date);
 
                                 if (res == SessionForm.Results.CloseMe)
                                 {
@@ -353,7 +352,7 @@ namespace MapleShark
 
                             if (waiting.TryGetValue(hash, out session))
                             {
-                                var res = session.BufferTCPPacket(tcpPacket, packet.Timeval.Date);
+                                var res = session.BufferTCPPacket(tcpPacket, packet.Header.Timeval.Date);
 
                                 switch (res)
                                 {
@@ -378,8 +377,11 @@ namespace MapleShark
             }
             catch (Exception)
             {
-                if (!mDevice.Opened)
-                    mDevice.Open(DeviceMode.Promiscuous, 1);
+                if (!mDevice.Started)
+                {
+                    mDevice.Open(DeviceModes.Promiscuous, 1);
+                    mDevice.StartCapture();
+                }
             }
         }
 

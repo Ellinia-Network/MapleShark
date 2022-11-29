@@ -13,29 +13,29 @@ namespace MapleShark
 {
     public partial class SetupForm : Form
     {
+        private Dictionary<string, string> interfaceNames = new Dictionary<string, string>();
+
         public SetupForm()
         {
             InitializeComponent();
 
             Text = "MapleShark " + Program.AssemblyVersion + ", " + Program.AssemblyCopyright;
             bool selected = false;
-            int localAreaConnection = -1;
+            //int localAreaConnection = -1;
 
-            foreach (LibPcapLiveDevice device in LibPcapLiveDeviceList.Instance)
+            foreach (var devInterface in PcapInterface.GetAllPcapInterfaces())
             {
-                if (!device.Interface.Addresses.Exists(a => a != null && a.Addr != null && a.Addr.ipAddress != null)) continue;
-                var devInterface = device.Interface;
-                var friendlyName = devInterface.FriendlyName;
-                var description = devInterface.Description;
+                var deviceName = devInterface.FriendlyName;
+                if (deviceName == null)
+                    deviceName = devInterface.Name;
+                
+                int index = mInterfaceCombo.Items.Add(deviceName);
+                interfaceNames.Add(deviceName, devInterface.Name);
 
-                int index = mInterfaceCombo.Items.Add(friendlyName);
-                if ((friendlyName == "Local Area Connection" || friendlyName.Contains("LAN")) && !description.Contains("TAP") && !description.Contains("VPN")) localAreaConnection = index;
-
-                if (!selected && (selected = (friendlyName == Config.Instance.Interface))) mInterfaceCombo.SelectedIndex = index;
+                if (!selected && (selected = (deviceName == Config.Instance.Interface))) mInterfaceCombo.SelectedIndex = index;
             }
 
-            if (!selected && localAreaConnection >= 0) mInterfaceCombo.SelectedIndex = localAreaConnection;
-            else if (!selected && mInterfaceCombo.Items.Count > 0) mInterfaceCombo.SelectedIndex = 0;
+            if (!selected && mInterfaceCombo.Items.Count > 0) mInterfaceCombo.SelectedIndex = 0;
             mLowPortNumeric.Value = Config.Instance.LowPort;
             mHighPortNumeric.Value = Config.Instance.HighPort;
         }
@@ -57,7 +57,7 @@ namespace MapleShark
 
         private void mOKButton_Click(object pSender, EventArgs pArgs)
         {
-            Config.Instance.Interface = (string)mInterfaceCombo.SelectedItem;
+            Config.Instance.Interface = interfaceNames[(string)mInterfaceCombo.SelectedItem];
             Config.Instance.LowPort = (ushort)mLowPortNumeric.Value;
             Config.Instance.HighPort = (ushort)mHighPortNumeric.Value;
             Config.Instance.Save();
