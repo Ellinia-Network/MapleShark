@@ -311,30 +311,11 @@ namespace MapleShark
 
             packetReader.ReadUShort();
             ushort version = packetReader.ReadUShort();
-            byte subVersion = 1;
             string patchLocation = packetReader.ReadMapleString();
             byte[] localIV = packetReader.ReadBytes(4);
             byte[] remoteIV = packetReader.ReadBytes(4);
             byte serverLocale = packetReader.ReadByte();
-
-            if (serverLocale > 0x12)
-            {
-                return Results.CloseMe;
-            }
-
-            if (serverLocale == 0x02 || (serverLocale == 0x01 && version > 255))
-            {
-                // Is KMS
-
-                int test = int.Parse(patchLocation);
-                version = (ushort)(test & 0x7FFF);
-                subVersion = (byte)((test >> 16) & 0xFF);
-            }
-            else if (patchLocation.All(character => { return character >= '0' && character <= '9'; }))
-            {
-                if (!byte.TryParse(patchLocation, out subVersion))
-                    Console.WriteLine("Failed to parse subVersion");
-            }
+            byte subVersion = byte.Parse(patchLocation.Split(':')[0]);
 
             mBuild = version;
 

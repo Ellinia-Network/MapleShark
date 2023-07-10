@@ -15,7 +15,7 @@ namespace MapleShark
         public static short StartClientOp = 207; // v212.2
         //public static short EndClientOp = 0x680;
         public static short EndClientOp = 0x761;
-        //public static string OpcodeEncryptionKey = "N3x@nGLEUH@ckEr!";
-        public static string OpcodeEncryptionKey => "M@PleStoryMaPLe!";
+        public static string OpcodeEncryptionKey = "N3x@nGLEUH@ckEr!";
+        //public static string OpcodeEncryptionKey => "M@PleStoryMaPLe!";
     }
 }
