@@ -159,21 +159,27 @@ namespace MapleShark
             }
 
             Console.WriteLine($"Opcode: {opcode}");
-            if (opcode == Constants.OpcodeEncryption)
+            if (mOutbound && opcode == Constants.ClientOpcodeEncryption)
+            {
+                // TODO: Think if we give a fuck
+            }
+            else if (opcode == Constants.OpcodeEncryption)
             {
                 encryptedHeaders.Clear();
-                int numHeaders = BitConverter.ToInt32(packetBuffer, 4);
-                byte[] headersBuffer = new byte[numHeaders];
-                Buffer.BlockCopy(packetBuffer, 8, headersBuffer, 0, numHeaders);
+                int headersLength = BitConverter.ToInt32(packetBuffer, 0);
+                byte[] headersBuffer = new byte[headersLength];
+                Buffer.BlockCopy(packetBuffer, 4, headersBuffer, 0, headersLength);
                 string headers = TripleDESCipher.Decrypt(headersBuffer, Encoding.ASCII.GetBytes(Constants.OpcodeEncryptionKey));
                 try
                 {
-                    int headerOffset = 0;
-                    for (int i = Constants.StartClientOp; i < Constants.EndClientOp; i++)
+                    int realOpcode = Constants.StartClientOp;
+                    foreach (int obfuscatedOpcode in headers.Split('|').Select(int.Parse))
                     {
-                        encryptedHeaders.Add(int.Parse(headers.Substring(headerOffset, 4)), i);
-                        headerOffset += 4;
+                        encryptedHeaders[obfuscatedOpcode] = realOpcode;
+                        ++realOpcode;
                     }
+
+                    Console.WriteLine($"Decoded opcodes {Constants.StartClientOp} - {realOpcode - 1}");
                 }
                 catch (Exception exception)
                 {

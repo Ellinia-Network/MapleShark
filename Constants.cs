@@ -10,7 +10,9 @@ namespace MapleShark
     {
 
         //public static short OpcodeEncryption = 44;
-        public static short OpcodeEncryption = 45; // v212.2
+        //public static short OpcodeEncryption = 45; // v212.2
+        public static short OpcodeEncryption = 47; // v242.2
+        public static short ClientOpcodeEncryption = 109; // v242.2
         //public static short StartClientOp = 200;
         public static short StartClientOp = 207; // v212.2
         //public static short EndClientOp = 0x680;
